@@ -1,0 +1,34 @@
+#######################################
+# Syntax Coloring Map for SoftwareSerialEx
+# 
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+Timer				KEYWORD1
+SoftwareSerialEx	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+addtimer	KEYWORD2
+deltimer	KEYWORD2
+gettcnt		KEYWORD2
+
+
+begin	KEYWORD2
+end	KEYWORD2
+read	KEYWORD2
+write	KEYWORD2
+available	KEYWORD2
+overflow	KEYWORD2
+flush	KEYWORD2
+peek	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
