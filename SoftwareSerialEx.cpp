@@ -52,6 +52,13 @@ http://arduiniana.org.
 * HardwareTimer
 ******************************************************************************/
 
+HardwareTimer Timer(&TCCR1A,&TCCR1B,&TCNT1,&OCR1B,&TIMSK1,OCIE1B,&TIFR1,OCF1B);
+
+ISR(TIMER1_COMPB_vect)
+{
+  Timer.timer_comp_irq();
+}
+// construction function
 HardwareTimer::HardwareTimer(volatile uint8_t *tccra, volatile uint8_t *tccrb, volatile uint16_t *tcnt, volatile uint16_t *ocr, volatile uint8_t *timsk, uint8_t ocie, volatile uint8_t *tifr, uint8_t ocf):
   _tccra(tccra),
   _tccrb(tccrb),
@@ -72,10 +79,17 @@ HardwareTimer::HardwareTimer(volatile uint8_t *tccra, volatile uint8_t *tccrb, v
 	heap[i]=0;
   }  
 }
+// Becasue the wiring.c will use time1 as PWM, we need init in setup() again.
+void HardwareTimer::init()
+{
+	*_tccra = 0x00;
+	*_tccrb = 0x01;
+	//*_tccrb = 0x05;
+}
 // This function add a timer to the timer heap
 int8_t HardwareTimer::addtimer(uint16_t ocr, uint16_t add, tcfunc func, void *target)
 {
-  if(count<_TIMER_MAX_)
+  if(count<_TIMER_MAX_ && func)
   {
     uint16_t tcnt;
     uint8_t k;
@@ -371,14 +385,6 @@ void HardwareTimer::timer_comp_irq()
 	}while((*_tcnt-tcnt)>(*_ocr-tcnt));
 }
 
-
-
-HardwareTimer Timer(&TCCR1A,&TCCR1B,&TCNT1,&OCR1B,&TIMSK1,OCIE1B,&TIFR1,OCF1B);
-
-ISR(TIMER1_COMPB_vect)
-{
-  Timer.timer_comp_irq();
-}
 
 
 /******************************************************************************

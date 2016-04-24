@@ -72,9 +72,11 @@ private:
   uint8_t count;
 public:
   HardwareTimer(volatile uint8_t *tccra, volatile uint8_t *tccrb, volatile uint16_t *tcnt, volatile uint16_t *ocr, volatile uint8_t *timsk, uint8_t ocie, volatile uint8_t *tifr, uint8_t ocf);
+  void init();
   int8_t addtimer(uint16_t ocr, uint16_t add, tcfunc func, void *target);
   void deltimer(int8_t id);
   inline uint16_t gettcnt(){return *_tcnt;};
+  inline uint16_t getcount(){return count;};
   void timer_comp_irq();
 };
 

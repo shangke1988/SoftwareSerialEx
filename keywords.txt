@@ -14,9 +14,11 @@ SoftwareSerialEx	KEYWORD1
 # Methods and Functions (KEYWORD2)
 #######################################
 
+init		KEYWORD2
 addtimer	KEYWORD2
 deltimer	KEYWORD2
 gettcnt		KEYWORD2
+getcount	KEYWORD2
 
 
 begin	KEYWORD2
