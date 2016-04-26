@@ -8,7 +8,7 @@ Listen more than 1 ports in the same time.
 
 unfinished.
 
-#Example
+##Example
 
 #include <SoftwareSerialEx.h>
 class SoftwareSerialEx myss(8,9);
