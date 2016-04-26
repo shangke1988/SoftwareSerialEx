@@ -32,9 +32,9 @@ http://arduiniana.org.
 // When set, _DEBUG co-opts pins 11 and 13 for debugging with an
 // oscilloscope or logic analyzer.  Beware: it also slightly modifies
 // the bit times, so don't rely on it too much at high baud rates
-#define _DEBUG 0
-#define _DEBUG_PIN1 11
-#define _DEBUG_PIN2 13
+#define _DEBUG 1
+//#define _DEBUG_PIN1 11
+//#define _DEBUG_PIN2 13
 // 
 // Includes
 // 
@@ -69,15 +69,15 @@ HardwareTimer::HardwareTimer(volatile uint8_t *tccra, volatile uint8_t *tccrb, v
   _tifr(tifr),
   _bv_ocf(_BV(ocf))
 {
-  *tccra = 0x00;
-  *tccrb = 0x01;
-  //*timsk = _BV(OCIE1B);
-  count = 0;
-  for(uint8_t i=0;i<_TIMER_MAX_;i++)
-  {
-    used[i]=0;
-	heap[i]=0;
-  }  
+	*tccra = 0x00;
+	*tccrb = 0x01;
+	//*timsk = _BV(OCIE1B);
+	count = 0;
+	for(uint8_t i=0;i<_TIMER_MAX_;i++)
+	{
+		used[i]=0;
+		heap[i]=0;
+	}  
 }
 // Becasue the wiring.c will use time1 as PWM, we need init in setup() again.
 void HardwareTimer::init()
@@ -87,7 +87,7 @@ void HardwareTimer::init()
 	//*_tccrb = 0x05;
 }
 // This function add a timer to the timer heap
-int8_t HardwareTimer::addtimer(uint16_t ocr, uint16_t add, tcfunc func, void *target)
+int8_t HardwareTimer::addtimer(uint16_t ocr, uint16_t add, timer_func func, void *target)
 {
   if(count<_TIMER_MAX_ && func)
   {
@@ -298,7 +298,7 @@ void HardwareTimer::timer_comp_irq()
 			return;
 		}
 	#endif
-		tcfunc func = list[k].func;
+		timer_func func = list[k].func;
 		void* target = list[k].target;
 		uint8_t rec = (*func)(target);
 		if(rec==0)
@@ -385,9 +385,405 @@ void HardwareTimer::timer_comp_irq()
 	}while((*_tcnt-tcnt)>(*_ocr-tcnt));
 }
 
+/******************************************************************************
+* PCINTController
+******************************************************************************/
+#ifdef PCIE0
+	PCINTController PCINT_Ctrl0(&PCICR,PCIE0,&PCMSK0,&PINB);
+	ISR(PCINT0_vect)
+	{
+		PCINT_Ctrl0.pcint_irq();
+	}
+	#ifdef PCIE1
+		PCINTController PCINT_Ctrl1(&PCICR,PCIE1,&PCMSK1,&PINC);
+		ISR(PCINT1_vect)
+		{
+			PCINT_Ctrl1.pcint_irq();
+		}
+		#ifdef PCIE2
+			PCINTController PCINT_Ctrl2(&PCICR,PCIE2,&PCMSK2,&PIND);
+			ISR(PCINT2_vect)
+			{
+				PCINT_Ctrl2.pcint_irq();
+			}
+			#define PCI_CTRL(n)  (((n)==0) ? (&PCINT_Ctrl0) : (((n)==1) ? (&PCINT_Ctrl1) : (&PCINT_Ctrl2)))
+		#else
+			#define PCI_CTRL(n)  (((n)==0) ? (&PCINT_Ctrl0) : (&PCINT_Ctrl1))
+		#endif
+	#else
+		#define PCI_CTRL(n)  (&PCINT_Ctrl0)
+	#endif
+#endif
 
 
+PCINTController::PCINTController(volatile uint8_t *pcicr, uint8_t pcie, volatile uint8_t *pcmsk, volatile uint8_t *pin):
+//  _pcicr(pcicr),
+//  _bv_pcie(_BV(pcie)),
+  _pcmsk(pcmsk),
+  _pin(pin)
+{
+	//*pcmsk = 0;
+	*pcicr |= _BV(pcie);
+	for(uint8_t i=0;i<8;i++)
+	{
+		func_list[i] = NULL;
+	}
+}
+
+void PCINTController::enable(uint8_t bv)
+{
+	//uint8_t bv = _BV(bit);
+	uint8_t oldSREG = SREG;
+	cli();
+	*_pcmsk |= bv;
+	SREG = oldSREG;
+}
+void PCINTController::disenable(uint8_t bv)
+{
+	//uint8_t bv = _BV(bit);
+	uint8_t oldSREG = SREG;
+	cli();
+	*_pcmsk &= ~bv;
+	SREG = oldSREG;
+}
+
+void PCINTController::addpcint(uint8_t bit, SoftwareSerialEx* ss)
+{
+	if(bit<8 && ss!=NULL)
+	{
+		uint8_t bv = _BV(bit);
+		disenable(bv);
+		func_list[bit] = ss;
+		uint8_t i;
+		for(i=0;i<count;i++)
+		{
+			if(mask_list[i].bit == bit)
+				break;
+		}
+		if(i<8)
+		{
+			mask_list[i].mask = bv;
+			mask_list[i].bit = bit;
+			if(i==count)
+			{
+				count++;
+			}
+			enable(bv);
+		}
+		#if _DEBUG
+		else
+			Serial.println(F("ERROR:addpcint:unreachable."));
+		#endif		
+	}
+}
+
+void PCINTController::delpcint(uint8_t bit)
+{
+	if(bit<8)
+	{
+		disenable(_BV(bit));
+		func_list[bit] = NULL;
+		for(uint8_t i=0;i<count;i++)
+		{
+			if(mask_list[i].bit == bit)
+			{
+				uint8_t oldSREG = SREG;
+				cli();
+				for(;i<count-1;i++)
+				{
+					mask_list[i]=mask_list[i+1];
+				}
+				count--;
+				SREG = oldSREG;
+			}
+		}		
+	}
+}
+
+void PCINTController::pcint_irq()
+{
+	uint16_t tcnt = Timer.gettcnt();
+	uint8_t pin = *_pin;
+	pin = (~pin) & (*_pcmsk);
+	if(pin)
+	{
+		for(uint8_t i=0;i<count;i++)
+		{
+			if(pin & mask_list[i].mask)
+			{
+				if(func_list[i])
+				{
+					uint8_t rec = func_list[i]->recv_start(tcnt);
+					if(!rec)
+					{
+						*_pcmsk &= ~mask_list[i].mask;
+					}					
+				}
+			}
+		}
+	}
+}
 /******************************************************************************
 * SoftwareSerialEx
 ******************************************************************************/
-
+SoftwareSerialEx::SoftwareSerialEx(uint8_t rx, uint8_t tx)
+{
+	//initialise variables
+	_listen=0;
+	//initialise buffers
+	_rx_buffer_tail = 0;
+	_rx_buffer_head = 0;
+	_tx_buffer_tail = 0;
+	_tx_buffer_head = 0;
+	_tx_buffer_empty = 1;
+	_tx_error = 0;
+	//initialise delay
+	_rx_delay_centering = 0;
+	_bit_delay  = 0;
+	
+	//set tx pin
+	digitalWrite(tx, HIGH);
+	pinMode(tx, OUTPUT);
+	_tx_BitMask = digitalPinToBitMask(tx);
+	_tx_BitMask_inv = ~_tx_BitMask;
+	uint8_t port = digitalPinToPort(tx);
+	_tx_Port = portOutputRegister(port);
+	//set rx pin
+	pinMode(rx, INPUT);
+	digitalWrite(rx, HIGH); 
+	_rx_Pin = rx;
+	_rx_BitMask = digitalPinToBitMask(rx);
+	port = digitalPinToPort(rx);
+	_rx_Port = portInputRegister(port);
+	//set pcint
+	_ispcint = (digitalPinToPCICR(_rx_Pin)!=0);
+	if(_ispcint)
+	{
+		uint8_t pcin=digitalPinToPCICRbit(_rx_Pin);
+		_pci_ctrl = PCI_CTRL(pcin);
+		_pcint_bit = digitalPinToPCMSKbit(_rx_Pin);
+		_pcint_maskvalue = _BV(_pcint_bit);	
+	}else
+	{
+		_pci_ctrl = NULL;
+		_pcint_bit = 0;
+		_pcint_maskvalue = 0;
+	}
+}
+SoftwareSerialEx::~SoftwareSerialEx()
+{
+	stoplisten();
+}
+void SoftwareSerialEx::listen()
+{
+	if(_ispcint && (!_listen))
+	{
+		_pci_ctrl->addpcint(_pcint_bit, this);
+		_listen = 1;
+	}
+}
+void SoftwareSerialEx::stoplisten()
+{
+	if(_ispcint && _listen)
+	{
+		_pci_ctrl->delpcint(_pcint_bit);
+		_listen = 0;
+	}
+}
+void SoftwareSerialEx::enable_pcint()
+{
+	// consider the speed, hasn't checked _ispcint.
+	_pci_ctrl->enable(_pcint_maskvalue);
+}
+void SoftwareSerialEx::disenable_pcint()
+{
+	// consider the speed, hasn't checked _ispcint.
+	_pci_ctrl->enable(_pcint_maskvalue);
+}
+void SoftwareSerialEx::begin(long speed)
+{
+	_bit_delay = (F_CPU + speed/2)/ speed;
+	if(_ispcint)
+	{
+		//round, not floor. perhaps unuseful, but no bad.		
+		_rx_delay_centering = (F_CPU + speed)/ (speed*2);		
+		listen();
+	}	
+}
+uint8_t SoftwareSerialEx::recv_start(uint16_t tcnt)
+{
+	uint8_t rec = Timer.addtimer(tcnt+_rx_delay_centering, _bit_delay, (timer_func)rx_irq, (void*)this);
+	if(rec<0)
+	{
+		#if _DEBUG
+		Serial.println(F("ERROR:recv_start:can't addtimer."));
+		#endif
+		//enable pcint
+		return 1;
+	}
+	_rx_bitnum = 0;
+	_rx_data = 0;
+	//disenable pcint
+	return 0;
+}
+uint8_t SoftwareSerialEx::rx_irq(SoftwareSerialEx* p)
+{
+	return p->recv_bits();
+}
+uint8_t SoftwareSerialEx::tx_irq(SoftwareSerialEx* p)
+{
+	return p->transmit();
+}
+#define RX_PIN (*_rx_Port & _rx_BitMask)
+uint8_t SoftwareSerialEx::recv_bits()
+{
+	_rx_bitnum++;
+	//start bit
+	if(_rx_bitnum == 1)
+	{
+		if(RX_PIN == 0)
+		{
+			return 1;
+		}else
+		{
+			enable_pcint();
+			return 0;
+		}
+	}
+	//data bits
+	_rx_data >>= 1;
+	if(RX_PIN)
+		_rx_data |= 0x80;
+	if(_rx_bitnum == 9)
+	{
+		//store buffer
+		uint8_t next = (_rx_buffer_tail + 1) % _SS_RX_BUFF_SIZE;
+		if(next!=_rx_buffer_head)
+		{
+			_rx_buffer[_rx_buffer_tail] = _rx_data;
+			_rx_buffer_tail = next;
+		}else
+		{
+			_rx_buffer_overflow = 1;
+		}
+		enable_pcint();
+		return 0;
+	}
+	// Ignore stop bit. Pcint process the raise edge of 8th bit is fast than timer.
+	// Because the timer with sorting is very slow, pcint check pins low before scan table. 
+	// If pcint only process fall edge, it is perfect. But there is only two int pins in ATmega328.
+	return 1;
+}
+uint8_t SoftwareSerialEx::transmit()
+{
+	_tx_bitnum++;
+	// start bit
+	if(_tx_bitnum == 1)
+	{
+		*_tx_Port &= _tx_BitMask_inv;
+		return 1;
+	}
+	// data bits
+	if(_tx_bitnum <= 9)
+	{
+		if(_tx_data&0x01)
+			*_tx_Port |= _tx_BitMask;
+		else
+			*_tx_Port &= _tx_BitMask_inv;
+		_tx_data >>= 1;
+		return 1;
+	}
+	// stop bit
+	*_tx_Port |= _tx_BitMask;
+	if(_tx_bitnum >= 9 + _SS_STOP_BIT)
+	{
+		_tx_bitnum = 0;
+		if(_tx_buffer_tail == _tx_buffer_head)
+		{
+			_tx_buffer_empty = 1;
+			return 0;
+		}else
+		{
+			_tx_data = _tx_buffer[_tx_buffer_head];
+			_tx_buffer_head = (_tx_buffer_head + 1) % _SS_TX_BUFF_SIZE;
+			return 1;
+		}		
+	}
+	return 1;
+}
+int SoftwareSerialEx::available(void)
+{
+  	uint8_t head = _rx_buffer_head;
+	uint8_t tail = _rx_buffer_tail;
+	if (head > tail) return _SS_RX_BUFF_SIZE - head + tail;
+	return tail - head;
+}
+int SoftwareSerialEx::availableForWrite(void)
+{
+	uint8_t head = _tx_buffer_head;
+	uint8_t tail = _tx_buffer_tail;
+	if (head >= tail) return _SS_TX_BUFF_SIZE - 1 - tail + head;
+	return head - tail - 1;
+}
+int SoftwareSerialEx::peek(void)
+{
+  if (_rx_buffer_head == _rx_buffer_tail) {
+    return -1;
+  } else {
+    return _rx_buffer[_rx_buffer_head];
+  }
+}
+int SoftwareSerialEx::read(void)
+{
+	// if the head isn't ahead of the tail, we don't have any characters
+	if (_rx_buffer_head == _rx_buffer_tail) {
+		return -1;
+	} else {
+		unsigned char c = _rx_buffer[_rx_buffer_head];
+		_rx_buffer_head = (_rx_buffer_head + 1) % _SS_RX_BUFF_SIZE;
+		return c;
+	}
+}
+size_t SoftwareSerialEx::write(uint8_t byte)
+{
+	if(!_bit_delay)
+		return 0;
+	
+	if(_tx_buffer_empty)
+	{
+		if(!_tx_error)
+			_tx_data = byte;
+		_tx_bitnum = 0;		
+		uint16_t tcnt = Timer.gettcnt();
+		//*_tx_Port &= _tx_BitMask_inv;		// in case of addtimer fail
+		uint8_t rec = Timer.addtimer(tcnt+_bit_delay, _bit_delay, (timer_func)tx_irq, (void*)this);
+		if(!_tx_error)
+		{
+			if(rec<0)
+			{
+				_tx_error=1;
+			}else
+			{
+				_tx_buffer_empty = 0;
+			}
+			return 1;
+		}else
+		{
+			if(rec>=0)
+			{
+				_tx_error=0;
+				_tx_buffer_empty = 0;
+			}
+		}		
+	}
+	uint8_t next = (_tx_buffer_tail + 1) % _SS_TX_BUFF_SIZE;
+	while(next==_tx_buffer_head)
+	{
+		// Interrupts are disabled, so this function can't work
+		if (bit_is_clear(SREG, SREG_I)) 
+			return 0;
+	}
+	_tx_buffer[_tx_buffer_tail] = byte;
+	_tx_buffer_tail = next;
+	return 1;
+}
