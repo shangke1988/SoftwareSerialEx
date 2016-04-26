@@ -10,11 +10,16 @@ unfinished.
 
 #Example
 
-\#include <SoftwareSerialEx.h>\n
+\#include <SoftwareSerialEx.h>
+
 class SoftwareSerialEx myss(8,9);
+
 void setup() {
+
  myss.begin(9600); 
+ 
  myss.print(F("Hello"));
+ 
 }
 
 #软串口
