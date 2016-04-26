@@ -10,7 +10,7 @@ unfinished.
 
 #Example
 
-\#include <SoftwareSerialEx.h>
+\#include <SoftwareSerialEx.h>\n
 class SoftwareSerialEx myss(8,9);
 void setup() {
  myss.begin(9600); 
