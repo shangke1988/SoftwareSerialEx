@@ -1,5 +1,5 @@
-# SoftwareSerialEx
-Advance Software Serial Librarie for Arduino
+# SoftwareSerialEx for Arduino UNO
+Advance Software Serial Librarie for Arduino UNO
 
 Use Timer1. Some PWM pins can't be used.
 Enables serial communication on digital pins with interrupt. 
