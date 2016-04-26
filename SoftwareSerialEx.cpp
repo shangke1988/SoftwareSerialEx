@@ -1,15 +1,14 @@
 /*
-SoftwareSerialEx.cpp (formerly NewSoftSerial.cpp) - 
+SoftwareSerialEx.h (formerly SoftSerial.h of Arduino) - 
 Multi-instance software serial library for Arduino/Wiring
+by shangke1988@hust.edu.cn @ 2016/04/26
+Tested 9600Hz with one instance
+
 -- Interrupt-driven receive and other improvements by ladyada
    (http://ladyada.net)
 -- Tuning, circular buffer, derivation from class Print/Stream,
-   multi-instance support, porting to 8MHz processors,
-   various optimizations, PROGMEM delay tables, inverse logic and 
-   direct port writing by Mikal Hart (http://www.arduiniana.org)
+   (http://www.arduiniana.org)
 -- Pin change interrupt macros by Paul Stoffregen (http://www.pjrc.com)
--- 20MHz processor support by Garrett Mace (http://www.macetech.com)
--- ATmega1280/2560 support by Brett Hagman (http://www.roguerobotics.com/)
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public
@@ -26,13 +25,13 @@ License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 The latest version of this library can always be found at
-http://arduiniana.org.
+https://github.com/shangke1988/SoftwareSerialEx
 */
 
 // When set, _DEBUG co-opts pins 11 and 13 for debugging with an
 // oscilloscope or logic analyzer.  Beware: it also slightly modifies
 // the bit times, so don't rely on it too much at high baud rates
-#define _DEBUG 1
+#define _DEBUG 0
 //#define _DEBUG_PIN1 11
 //#define _DEBUG_PIN2 13
 // 
@@ -46,6 +45,7 @@ http://arduiniana.org.
 
 #if _DEBUG
 #include "HardwareSerial.h"
+uint16_t g_tcnt;
 #endif
 
 /******************************************************************************
@@ -56,7 +56,7 @@ HardwareTimer Timer(&TCCR1A,&TCCR1B,&TCNT1,&OCR1B,&TIMSK1,OCIE1B,&TIFR1,OCF1B);
 
 ISR(TIMER1_COMPB_vect)
 {
-  Timer.timer_comp_irq();
+	Timer.timer_comp_irq();
 }
 // construction function
 HardwareTimer::HardwareTimer(volatile uint8_t *tccra, volatile uint8_t *tccrb, volatile uint16_t *tcnt, volatile uint16_t *ocr, volatile uint8_t *timsk, uint8_t ocie, volatile uint8_t *tifr, uint8_t ocf):
@@ -95,7 +95,6 @@ int8_t HardwareTimer::addtimer(uint16_t ocr, uint16_t add, timer_func func, void
     uint8_t k;
 	uint8_t oldSREG = SREG;
 	cli();
-	tcnt = *_tcnt;
 	if(count>0)
     {
 	  if(*_tifr & _bv_ocf)
@@ -104,6 +103,7 @@ int8_t HardwareTimer::addtimer(uint16_t ocr, uint16_t add, timer_func func, void
 	    timer_comp_irq();
 	  }
     }
+	tcnt = *_tcnt;
 /*	while((*_tcnt-tcnt) +16 > (ocr-tcnt))
 	{
 	  uint8_t rec=(*func)(target);
@@ -517,7 +517,7 @@ void PCINTController::pcint_irq()
 					if(!rec)
 					{
 						*_pcmsk &= ~mask_list[i].mask;
-					}					
+					}						
 				}
 			}
 		}
@@ -605,14 +605,24 @@ void SoftwareSerialEx::begin(long speed)
 	_bit_delay = (F_CPU + speed/2)/ speed;
 	if(_ispcint)
 	{
-		//round, not floor. perhaps unuseful, but no bad.		
-		_rx_delay_centering = (F_CPU + speed)/ (speed*2);		
+		//round, not floor. perhaps unuseful, but no bad.	
+		//_rx_delay_centering = (F_CPU*3 + speed)/ (speed*2);				
+		_rx_delay_centering = (F_CPU*3 + speed)/ (speed*2);	//ignore start bit	
 		listen();
 	}	
+	#if _DEBUG
+	Serial.print(F("_bit_delay:"));
+	Serial.print(_bit_delay);
+	Serial.print(F("_rx_delay_centering:"));
+	Serial.println(_rx_delay_centering);
+	#endif
 }
 uint8_t SoftwareSerialEx::recv_start(uint16_t tcnt)
 {
+//	uint8_t rec = Timer.addtimer(tcnt+_rx_delay_centering, _bit_delay, (timer_func)rx_irq, (void*)this);
 	uint8_t rec = Timer.addtimer(tcnt+_rx_delay_centering, _bit_delay, (timer_func)rx_irq, (void*)this);
+//	uint16_t tcnt2 = Timer.gettcnt();
+//	Serial.println(tcnt2-tcnt);
 	if(rec<0)
 	{
 		#if _DEBUG
@@ -621,7 +631,8 @@ uint8_t SoftwareSerialEx::recv_start(uint16_t tcnt)
 		//enable pcint
 		return 1;
 	}
-	_rx_bitnum = 0;
+//	_rx_bitnum = 0;
+	_rx_bitnum = 1;
 	_rx_data = 0;
 	//disenable pcint
 	return 0;
