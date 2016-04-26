@@ -8,6 +8,15 @@ Listen more than 1 ports in the same time.
 
 unfinished.
 
+#Example
+
+#include <SoftwareSerialEx.h>
+class SoftwareSerialEx myss(8,9);
+void setup() {
+ myss.begin(9600); 
+ myss.print(F("Hello"));
+}
+
 #软串口
 高级的arduino软串口库
 
